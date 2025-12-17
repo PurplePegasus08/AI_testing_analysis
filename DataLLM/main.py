@@ -19,7 +19,7 @@ except FileNotFoundError:
 # --------------------------------------
 # INSERT YOUR GEMINI API KEY HERE
 # --------------------------------------
-genai.configure(api_key="AIzaSyB0pmTvTBZ_HHVmG9ujEB9PthfVWeulwX4")
+genai.configure(api_key="my_key")
 
 # --- 2. DATA STATS FUNCTION ---
 def dfstats(data):
