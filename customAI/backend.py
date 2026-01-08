@@ -12,6 +12,15 @@ API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 if not API_KEY:
     raise RuntimeError("Missing Gemini API key")
 
+try:
+    from langchain_experimental.tools.python.tool import PythonREPLTool
+    from langchain_experimental.utilities import PythonREPL
+    _HAS_LANGCHAIN_PY_REPL = True
+except Exception:
+    PythonREPLTool = None
+    PythonREPL = None
+    _HAS_LANGCHAIN_PY_REPL = False
+
 # ---------- memory ----------
 class MemStore:
     def __init__(self): self._db: dict[str, bytes] = {}
@@ -87,6 +96,21 @@ def exec_code(code: str, df: pd.DataFrame) -> tuple[pd.DataFrame, Optional[str]]
     except Exception as e:
         return df, f"{type(e).__name__}: {e}"
 
+def run_code_with_langchain_repl(code: str, df: pd.DataFrame) -> tuple[pd.DataFrame, Optional[str], str]:
+    if not _HAS_LANGCHAIN_PY_REPL:
+        new_df, err = exec_code(code, df)
+        return new_df, err, ""
+    try:
+        repl = PythonREPL(locals={"df": df.copy(), "pd": pd})
+        tool = PythonREPLTool(python_repl=repl)
+        output = tool.run(code) or ""
+        new_df = getattr(repl, "locals", {}).get("df")
+        if not isinstance(new_df, pd.DataFrame):
+            return df, "Missing df variable", output
+        return new_df, None, output
+    except Exception as e:
+        return df, f"{type(e).__name__}: {e}", ""
+
 # ---------- prompt ----------
 def build_prompt(state: AgentState) -> str:
     err = f"\nError: {state.error}\nFix it." if state.error else ""
@@ -96,6 +120,7 @@ Current data:
 {get_stats(state.work_id)}
 User: "{state.user_message}"
 {err}{retry}
+If you choose action "code", output Python code that uses pandas and the variable df (a DataFrame). Keep the final DataFrame assigned to df. You may print intermediate results.
 JSON: {{"action": "answer"|"code"|"clarify", "content": "..."}}
 """.strip()
 
@@ -111,6 +136,21 @@ def upload_node(state: AgentState, file_content: bytes) -> AgentState:
 def eda_node(state: AgentState) -> AgentState:
     state.user_message = get_stats(state.work_id)
     state.next_node = "human_input"
+    return state
+
+def human_input_node(state: AgentState) -> AgentState:
+    txt = (state.user_message or "").strip()
+    low = txt.lower()
+    if low in {"undo", "/undo"}:
+        state.next_node = "undo"
+        return state
+    if low.startswith("export"):
+        parts = txt.split(maxsplit=1)
+        if len(parts) > 1 and parts[1].strip():
+            state.export_filename = parts[1].strip()
+        state.next_node = "export"
+        return state
+    state.next_node = "execute"
     return state
 
 def execute_node(state: AgentState) -> AgentState:
@@ -130,17 +170,22 @@ def execute_node(state: AgentState) -> AgentState:
         elif action == "code":
             state.push_undo(f"Code: {content[:60]}...")
             df = store.get_df(state.work_id)
-            new_df, err = exec_code(content, df)
+            new_df, err, output = run_code_with_langchain_repl(content, df)
             if err:
                 state.error, state.retry_count = err, state.retry_count + 1
+                state.user_message = f"Error: {err}"
                 state.next_node = "execute" if state.retry_count < state.MAX_RETRIES else "human_input"
             else:
                 state.work_id = store.write_df(new_df)
-                state.user_message, state.error, state.retry_count = "✅ Success", None, 0
+                msg = "✅ Success"
+                if output.strip():
+                    msg = msg + "\n\n" + output.strip()
+                state.user_message, state.error, state.retry_count = msg, None, 0
                 state.next_node = "eda"
         else: raise ValueError(f"Unknown action {action}")
     except Exception as e:
         state.error, state.retry_count = str(e), state.retry_count + 1
+        state.user_message = f"Error: {state.error}"
         state.next_node = "execute" if state.retry_count < state.MAX_RETRIES else "human_input"
     return state
 
@@ -168,6 +213,7 @@ def build_graph():
     w.add_node("execute", execute_node)
     w.add_node("undo", undo_node)
     w.add_node("export", export_node)
+    w.add_node("human_input", human_input_node)
     w.add_edge(START, "upload")
     w.add_edge("upload", "eda")
     w.add_edge("eda", "human_input")
