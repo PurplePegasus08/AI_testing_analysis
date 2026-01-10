@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InsightFlow | Smart Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"Inter"', 'system-ui', 'sans-serif'],
+              mono: ['"JetBrains Mono"', 'monospace'],
+            },
+            colors: {
+              brand: {
+                50: '#f5f7ff',
+                100: '#ebf0ff',
+                200: '#d6e0ff',
+                300: '#adc2ff',
+                400: '#85a3ff',
+                500: '#6366f1',
+                600: '#4f46e5',
+                700: '#4338ca',
+                800: '#3730a3',
+                900: '#312e81',
+              },
+              surface: {
+                50: '#f8fafc',
+                100: '#f1f5f9',
+                200: '#e2e8f0',
+                300: '#cbd5e1',
+                400: '#94a3b8',
+                500: '#64748b',
+                600: '#475569',
+                700: '#334155',
+                800: '#1e293b',
+                900: '#0f172a',
+                950: '#020617',
+              }
+            },
+            boxShadow: {
+              'material': '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
+              'material-hover': '0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23)',
+              'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+            }
+          },
+        },
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+      body { 
+        font-family: 'Inter', sans-serif; 
+        -webkit-font-smoothing: antialiased;
+        background-color: #f8fafc;
+        transition: background-color 0.3s ease;
+      }
+      .dark body {
+        background-color: #0f172a; /* Softer dark background */
+      }
+      
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { 
+        background: rgba(148, 163, 184, 0.2); 
+        border-radius: 10px;
+      }
+      .dark ::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.3); }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.4); }
+      
+      .canvas-grid {
+        background-image: 
+          linear-gradient(to right, rgba(99, 102, 241, 0.05) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(99, 102, 241, 0.05) 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+
+      @keyframes slideUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+      
+      .recharts-bar-rectangle:hover {
+        filter: brightness(1.2);
+        transition: filter 0.2s ease;
+      }
+    </style>
+
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="text-surface-900 dark:text-surface-100 overflow-hidden">
+    <div id="root"></div>
+  <script type="module" src="/src/index.tsx"></script>
+</body>
+</html>
