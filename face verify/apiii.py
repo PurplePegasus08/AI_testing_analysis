@@ -1,65 +1,98 @@
-# apii.py
-import uvicorn
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse,HTMLResponse
+import io
 import cv2
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from face_engine import process_one_frame, load_and_sync
-from collections import defaultdict
+import face_engine as engine
+import pandas as pd
 
-app = FastAPI(title="Face-Attendance API")
+app = FastAPI()
 
-# Load face bank ONCE at server startup
-KNOWN_FACES, KNOWN_NAMES = load_and_sync()
+# Enable CORS for the HTML frontend
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/",response_class=HTMLResponse)
+async def get_ui():
+    with open("index.html","r") as f:
+        return f.read()
+# ---------------- CORE REAL-TIME ENDPOINTS ---------------- #
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    """Handles real-time stream from index.html"""
     await websocket.accept()
-    
-    # --- PER-CONNECTION STATE ---
-    # This prevents User A from affecting User B's counter
-    stability_counter = defaultdict(int) 
-    
+    connection_stability = {} 
     try:
         while True:
-            # Receive image bytes from client
             data = await websocket.receive_bytes()
+            nparr = np.frombuffer(data, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-            # Decode image
-            np_arr = np.frombuffer(data, np.uint8)
-            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            if frame is None: continue
-            
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Process frame with the local stability_counter
-            info = process_one_frame(
-                frame_rgb, 
-                KNOWN_FACES, 
-                KNOWN_NAMES,
-                stability_counter
-            )
-
-            # Send result back to client
-            await websocket.send_json({
-                "name": info["name"],
-                "status": info["status"],
-                "liveness": int(info["liveness"]),
-                "progress": info.get("progress", "0/5")
-            })
-
-            # If verified, we can close or keep listening
-            if info["status"] == "VERIFIED":
-                # Optional: break if you want the session to end after one success
-                pass 
-
+            if frame is not None:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # Processes frame using the face_engine logic
+                result = engine.process_one_frame(frame_rgb, connection_stability)
+                await websocket.send_json(result)
     except WebSocketDisconnect:
-        print("Client disconnected")
-    except Exception as e:
-        print(f"Error: {e}")
+        print("Client disconnected from WebSocket")
 
-# Static files for the frontend
-app.mount("/", StaticFiles(directory=".", html=True), name="static")
+@app.post("/verify")
+async def verify(file: UploadFile = File(...)):
+    """Testing endpoint for single image uploads"""
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Static testing uses an empty dict to avoid persisting stability across unrelated images
+    result = engine.process_one_frame(frame_rgb, {})
+    return result
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# ---------------- USER MANAGEMENT ENDPOINTS ---------------- #
+
+@app.post("/register")
+async def register(name: str = Form(...), file: UploadFile = File(...)):
+    """Registers a new face embedding into the database"""
+    success = engine.register_new_face(name, await file.read())
+    if not success:
+        raise HTTPException(status_code=400, detail="No face detected in image")
+    return {"message": f"User {name} registered successfully"}
+
+@app.delete("/user/{name}")
+def delete_user(name: str):
+    """Removes a user from the database"""
+    engine.delete_user(name)
+    return {"message": f"User {name} deleted"}
+
+# ---------------- REPORTING ENDPOINTS ---------------- #
+
+@app.get("/attendance/yesterday")
+def yesterday():
+    """Returns attendance logs for the previous day"""
+    data = engine.get_attendance_report(1)
+    # Formats the raw database tuples into a readable JSON list
+    return [{"name": r[0], "start": r[1], "end": r[2], "duration": str(r[3])} for r in data]
+
+@app.get("/attendance/export")
+def export_csv():
+    """Generates and streams a CSV of the last month's attendance"""
+    conn = engine.db_pool.getconn()
+    try:
+        # Queries attendance logs for the last 30 days
+        df = pd.read_sql("SELECT * FROM attendance WHERE timestamp > current_date - interval '1 month'", conn)
+        
+        stream = io.StringIO()
+        df.to_csv(stream, index=False)
+        return StreamingResponse(
+            iter([stream.getvalue()]), 
+            media_type="text/csv", 
+            headers={"Content-Disposition": "attachment; filename=attendance_export.csv"}
+        )
+    finally:
+        engine.db_pool.putconn(conn)
+
+@app.get("/health")
+def health():
+    """System health check including GPU availability"""
+    return {"status": "running", "gpu": engine.torch.cuda.is_available()}
