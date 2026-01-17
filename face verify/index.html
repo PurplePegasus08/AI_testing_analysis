@@ -53,21 +53,33 @@
         }
 
         // 2. Manual Image Test Function
-        async function testWithImage() {
-            const fileInput = document.getElementById('imageInput');
-            if (fileInput.files.length === 0) return alert("Select a file first");
+  async function testWithImage() {
+    const fileInput = document.getElementById('imageInput');
+    if (fileInput.files.length === 0) return alert("Select a file first");
 
-            const formData = new FormData();
-            formData.append("file", fileInput.files[0]);
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
 
-            imageResult.innerText = "Processing...";
-            const response = await fetch("http://localhost:8000/verify", {
-                method: "POST",
-                body: formData
-            });
-            const data = await response.json();
-            imageResult.innerText = `Result: ${data.name} | Status: ${data.status}`;
+    imageResult.innerText = "Processing...";
+    
+    try {
+        // Ensure this matches your Uvicorn address
+        const response = await fetch("http://127.0.0.1:8000/verify", {
+            method: "POST",
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === "VERIFIED") {
+            imageResult.innerHTML = `<b style="color: #4caf50;">✅ SUCCESS: Attendance marked for ${data.name}</b>`;
+        } else {
+            imageResult.innerHTML = `<b style="color: #ff9800;">⚠️ ${data.status}: Face detected but not verified.</b>`;
         }
+    } catch (err) {
+        imageResult.innerText = "Error: Could not connect to API";
+    }
+}
 
         init();
     </script>
