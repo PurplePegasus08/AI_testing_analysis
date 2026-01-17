@@ -2,120 +2,74 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Attendance System</title>
+    <title>AI Attendance System</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; margin: 0; padding: 20px; }
-        .container { position: relative; width: 640px; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2); background: #000; }
-        video { width: 100%; display: block; }
+        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
+        .main-container { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+        .video-wrapper { width: 640px; height: 480px; background: #000; position: relative; border: 2px solid #333; }
+        .overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border-left: 5px solid #0584ce; text-align: left; }
+        .test-panel { background: #1e1e1e; padding: 20px; border-radius: 10px; margin-top: 20px; border: 1px dashed #555; }
+        button { padding: 10px 20px; background: #00ff00; color: black; border: none; cursor: pointer; font-weight: bold; }
         canvas { display: none; }
-        .overlay { position: absolute; top: 20px; left: 20px; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); pointer-events: none; }
-        .status-box { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; border-left: 5px solid #ff9800; }
-        .status-verified { border-left-color: #4caf50; background: rgba(76, 175, 80, 0.2); }
-        h1 { color: #1a73e8; }
-        .info { margin-top: 20px; text-align: center; color: #555; }
     </style>
 </head>
 <body>
+    <h1>Face Recognition Attendance</h1>
 
-    <h1>Secure Face Attendance</h1>
-
-    <div class="container">
-        <video id="video" autoplay muted playsinline></video>
-        <div class="overlay">
-            <div id="statusUI" class="status-box">
-                <div id="nameDisplay" style="font-size: 1.5em; font-weight: bold;">Waiting...</div>
-                <div id="statusDisplay">Initializing Camera...</div>
-                <div id="livenessDisplay" style="font-size: 0.9em; opacity: 0.8;">Liveness: --</div>
+    <div class="main-container">
+        <div class="video-wrapper">
+            <video id="webcam" autoplay playsinline style="width:100%; height:100%;"></video>
+            <div class="overlay">
+                <div id="nameDisplay">User: ---</div>
+                <div id="statusDisplay">Status: Idle</div>
+                <div id="progressDisplay">Progress: 0/5</div>
             </div>
+        </div>
+
+        <div class="test-panel">
+            <h3>No Webcam? Test with an Image File:</h3>
+            <input type="file" id="imageInput" accept="image/*">
+            <button onclick="testWithImage()">Verify Image</button>
+            <div id="imageResult" style="margin-top:10px; color: #00ff00;"></div>
         </div>
     </div>
 
-    <div class="info">
-        <p>Ensure your face is well-lit and centered.</p>
-    </div>
-
-    <canvas id="canvas"></canvas>
+    <canvas id="captureCanvas"></canvas>
 
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const statusUI = document.getElementById('statusUI');
-        const nameDisplay = document.getElementById('nameDisplay');
-        const statusDisplay = document.getElementById('statusDisplay');
-        const livenessDisplay = document.getElementById('livenessDisplay');
+        const video = document.getElementById('webcam');
+        const imageResult = document.getElementById('imageResult');
 
-        const WS_URL = `ws://${window.location.host}/ws`;
-        let socket;
-
-        // 1. Setup Camera
-        async function setupCamera() {
+        // 1. Load UI even if Webcam fails
+        async function init() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
-                return new Promise((resolve) => {
-                    video.onloadedmetadata = () => resolve();
-                });
+                // Only start socket if webcam exists
+                startWebSocket();
             } catch (err) {
-                console.error("Camera error:", err);
-                statusDisplay.innerText = "Error: Camera not found";
+                document.getElementById('statusDisplay').innerText = "Status: Webcam Mode Disabled (No Camera Found)";
             }
         }
 
-        // 2. Setup WebSocket and Stream Frames
-        function startStreaming() {
-            socket = new WebSocket(WS_URL);
+        // 2. Manual Image Test Function
+        async function testWithImage() {
+            const fileInput = document.getElementById('imageInput');
+            if (fileInput.files.length === 0) return alert("Select a file first");
 
-            socket.onopen = () => {
-                console.log("Connected to API");
-                captureAndSend();
-            };
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
 
-            socket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                // Update UI
-                nameDisplay.innerText = data.name || "Unknown";
-                statusDisplay.innerText = `${data.status} (${data.progress || ""})`;
-                livenessDisplay.innerText = `Liveness Score: ${data.liveness}`;
-
-                if (data.status === "VERIFIED") {
-                    statusUI.classList.add('status-verified');
-                    // Stop sending frames once verified if desired
-                    // socket.close(); 
-                } else {
-                    statusUI.classList.remove('status-verified');
-                }
-            };
-
-            socket.onclose = () => {
-                console.log("Disconnected. Reconnecting...");
-                setTimeout(startStreaming, 1000); // Auto-reconnect
-            };
+            imageResult.innerText = "Processing...";
+            const response = await fetch("http://localhost:8000/verify", {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            imageResult.innerText = `Result: ${data.name} | Status: ${data.status}`;
         }
 
-        function captureAndSend() {
-            if (socket.readyState !== WebSocket.OPEN) return;
-
-            const context = canvas.getContext('2d');
-            canvas.width = 640;
-            canvas.height = 480;
-            context.drawImage(video, 0, 0, 640, 480);
-
-            // Convert canvas to blob and send
-            canvas.toBlob((blob) => {
-                if (blob) {
-                    socket.send(blob);
-                }
-                // Request next frame (throttled to ~10 FPS for stability)
-                setTimeout(() => {
-                    requestAnimationFrame(captureAndSend);
-                }, 100); 
-            }, 'image/jpeg', 0.8);
-        }
-
-        // Start
-        setupCamera().then(startStreaming);
+        init();
     </script>
 </body>
 </html>
