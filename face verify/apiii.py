@@ -14,7 +14,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/",response_class=HTMLResponse)
 async def get_ui():
-    with open("index.html","r") as f:
+    with open("index.html",encoding=" utf8") as f:
         return f.read()
 # ---------------- CORE REAL-TIME ENDPOINTS ---------------- #
 
@@ -36,17 +36,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(result)
     except WebSocketDisconnect:
         print("Client disconnected from WebSocket")
-
+        
+        
+#verification
 @app.post("/verify")
 async def verify(file: UploadFile = File(...)):
-    """Testing endpoint for single image uploads"""
+    """Testing endpoint for single image uploads - UPDATED to update DB"""
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     
-    # Static testing uses an empty dict to avoid persisting stability across unrelated images
+    # Create a temporary counter and pre-fill it to (STABILITY_FRAMES - 1)
+    # This ensures that process_one_frame triggers the database update on the first try
+    temp_stability = {} 
+    
+    # First, we identify who is in the photo
+    # We run it once to get the name
     result = engine.process_one_frame(frame_rgb, {})
+    detected_name = result.get("name")
+
+    if detected_name and detected_name != "Unknown":
+        # Manually force the counter to the limit for this specific request
+        force_counter = {detected_name: engine.STABILITY_FRAMES}
+        # Run it again with the forced counter to trigger mark_attendance_db
+        result = engine.process_one_frame(frame_rgb, force_counter)
+    
     return result
 
 # ---------------- USER MANAGEMENT ENDPOINTS ---------------- #
